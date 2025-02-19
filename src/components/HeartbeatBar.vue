@@ -50,10 +50,10 @@ export default {
     },
     data() {
         return {
-            beatWidth: 10,
-            beatHeight: 30,
-            hoverScale: 1.5,
-            beatHoverAreaPadding: 4,
+            beatWidth: 5,
+            beatHeight: 34,
+            hoverScale: 1.2,
+            beatHoverAreaPadding: 2,
             move: false,
             maxBeat: -1,
         };
@@ -175,7 +175,7 @@ export default {
             const firstValidBeat = this.shortBeatList.at(this.numPadding);
             const minutes = dayjs().diff(dayjs.utc(firstValidBeat?.time), "minutes");
             if (minutes > 60) {
-                return (minutes / 60).toFixed(0) + "h";
+                return (minutes / 60).toFixed(1) + "h";
             } else {
                 return minutes + "m";
             }
@@ -256,7 +256,7 @@ export default {
          */
         resize() {
             if (this.$refs.wrap) {
-                this.maxBeat = Math.floor(this.$refs.wrap.clientWidth / (this.beatWidth + this.beatHoverAreaPadding * 2));
+                this.maxBeat = Math.floor(this.$refs.wrap.clientWidth / (this.beatWidth + this.beatHoverAreaPadding * 2)) - 1;
             }
         },
 
@@ -295,7 +295,6 @@ export default {
 
         .beat {
             background-color: $primary;
-            border-radius: $border-radius;
 
             /*
             pointer-events needs to be changed because
