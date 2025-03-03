@@ -152,6 +152,12 @@
 
                 <!-- Title -->
                 <Editable v-model="config.title" tag="span" :contenteditable="editMode" :noNL="true" />
+                <div class="duration-selector ms-auto">
+                    <select v-model="statusDuration" class="form-select">
+                        <option value="60m" selected>60m</option>
+                        <option value="24h">24h</option>
+                    </select>
+                </div>
             </h1>
 
             <!-- Admin functions -->
@@ -438,6 +444,7 @@ export default {
             hasToken: false,
             config: {},
             selectedMonitor: null,
+            statusDuration: "60m",
             incident: null,
             previousIncident: null,
             showImageCropUpload: false,
@@ -673,6 +680,16 @@ export default {
                     }
                 }
             }
+        },
+
+        statusDuration: {
+            handler(newDuration) {
+                // 如果在编辑模式下,不需要更新数据
+                if (!this.editMode) {
+                    this.updateHeartbeatList();
+                }
+            },
+            immediate: false  // 不需要在组件创建时立即执行,因为 mounted 中已经调用了 updateHeartbeatList
         }
 
     },
@@ -771,7 +788,7 @@ export default {
         updateHeartbeatList() {
             // If editMode, it will use the data from websocket.
             if (! this.editMode) {
-                axios.get("/api/status-page/heartbeat/" + this.slug).then((res) => {
+                axios.get("/api/status-page/heartbeat/" + this.slug + "/" + this.statusDuration).then((res) => {
                     const { heartbeatList, uptimeList } = res.data;
 
                     this.$root.heartbeatList = heartbeatList;
@@ -1268,4 +1285,17 @@ footer {
     opacity: 0.7;
 }
 
+.title-flex {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.duration-selector {
+    select {
+        width: auto;
+        min-width: 80px;
+        display: inline-block;
+    }
+}
 </style>

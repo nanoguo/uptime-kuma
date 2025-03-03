@@ -1,3 +1,4 @@
+ARG TARGETPLATFORM=linux/amd64
 ARG BASE_IMAGE=louislam/uptime-kuma:base2
 
 ############################################
@@ -5,12 +6,12 @@ ARG BASE_IMAGE=louislam/uptime-kuma:base2
 # Run npm run build-healthcheck-armv7 in the host first, otherwise it will be super slow where it is building the armv7 healthcheck
 # Check file: builder-go.dockerfile
 ############################################
-FROM louislam/uptime-kuma:builder-go AS build_healthcheck
+FROM --platform=${TARGETPLATFORM} louislam/uptime-kuma:builder-go AS build_healthcheck
 
 ############################################
 # Build in Node.js
 ############################################
-FROM louislam/uptime-kuma:base2 AS build
+FROM --platform=${TARGETPLATFORM} louislam/uptime-kuma:base2 AS build
 USER node
 WORKDIR /app
 
@@ -22,11 +23,12 @@ RUN npm ci --omit=dev
 COPY . .
 COPY --chown=node:node --from=build_healthcheck /app/extra/healthcheck /app/extra/healthcheck
 RUN mkdir ./data
+RUN npm run build
 
 ############################################
 # ⭐ Main Image
 ############################################
-FROM $BASE_IMAGE AS release
+FROM --platform=${TARGETPLATFORM} $BASE_IMAGE AS release
 WORKDIR /app
 
 LABEL org.opencontainers.image.source="https://github.com/louislam/uptime-kuma"
@@ -59,7 +61,7 @@ USER node
 ############################################
 # Build an image for testing pr
 ############################################
-FROM louislam/uptime-kuma:base2 AS pr-test2
+FROM --platform=${TARGETPLATFORM} louislam/uptime-kuma:base2 AS pr-test2
 WORKDIR /app
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1
 
@@ -88,7 +90,7 @@ CMD ["npm", "run", "start-pr-test"]
 ############################################
 # Upload the artifact to Github
 ############################################
-FROM louislam/uptime-kuma:base2 AS upload-artifact
+FROM --platform=${TARGETPLATFORM} louislam/uptime-kuma:base2 AS upload-artifact
 WORKDIR /
 RUN apt update && \
     apt --yes install curl file

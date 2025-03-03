@@ -7,7 +7,8 @@
                 class="beat-hover-area"
                 :class="{ 'empty': (beat === 0) }"
                 :style="beatHoverAreaStyle"
-                :title="getBeatTitle(beat)"
+                @mouseenter="showTooltip(beat, index, $event)"
+                @mouseleave="startHideTooltip()"
             >
                 <div
                     class="beat"
@@ -15,6 +16,9 @@
                     :style="beatStyle"
                 />
             </div>
+        </div>
+        <!-- 全局tooltip -->
+        <div v-if="activeTooltip" class="global-beat-tooltip" :style="tooltipStyle" v-html="activeTooltip">
         </div>
         <div
             v-if="!$root.isMobile && size !== 'small' && beatList.length > 4 && $root.styleElapsedTime !== 'none'"
@@ -50,12 +54,17 @@ export default {
     },
     data() {
         return {
-            beatWidth: 5,
+            beatWidth: 6,
             beatHeight: 34,
             hoverScale: 1.2,
             beatHoverAreaPadding: 2,
             move: false,
-            maxBeat: -1,
+            maxBeat: 60,
+            activeBeatIndex: null,
+            activeTooltip: null,
+            tooltipPosition: { x: 0,
+                y: 0 },
+            tooltipHideTimer: null,
         };
     },
     computed: {
@@ -201,7 +210,14 @@ export default {
             } else {
                 return this.$t("time ago", [ (seconds / 60 / 60).toFixed(0) + "h" ]);
             }
-        }
+        },
+
+        tooltipStyle() {
+            return {
+                left: `${this.tooltipPosition.x}px`,
+                top: `${this.tooltipPosition.y}px`,
+            };
+        },
     },
     watch: {
         beatList: {
@@ -256,7 +272,7 @@ export default {
          */
         resize() {
             if (this.$refs.wrap) {
-                this.maxBeat = Math.floor(this.$refs.wrap.clientWidth / (this.beatWidth + this.beatHoverAreaPadding * 2)) - 1;
+                // this.maxBeat = Math.floor(this.$refs.wrap.clientWidth / (this.beatWidth + this.beatHoverAreaPadding * 2)) - 1;
             }
         },
 
@@ -267,9 +283,88 @@ export default {
          * @returns {string} Beat title
          */
         getBeatTitle(beat) {
-            return `${this.$root.datetime(beat.time)}` + ((beat.msg) ? ` - ${beat.msg}` : "");
+            let title = `<strong>${this.$root.datetime(beat.time)}</strong>`;
+
+            // 添加状态信息
+            if (beat.status === 0) {
+                title += " - <span class='status-down'>Down</span>";
+            } else if (beat.status === 2) {
+                title += " - <span class='status-pending'>Pending</span>";
+            } else if (beat.status === 3) {
+                title += " - <span class='status-maintenance'>Maintenance</span>";
+            } else {
+                title += " - <span class='status-up'>Up</span>";
+            }
+
+            // 添加消息信息（如果有）
+            if (beat.msg) {
+                // 检查是否有多个事件（通过逗号分隔）
+                if (beat.msg.includes(",")) {
+                    const events = beat.msg.split(",").map(event => event.trim());
+                    title += "<div class='beat-message-container'>";
+                    events.forEach(event => {
+                        title += `<div class='beat-message-item'>• ${event}</div>`;
+                    });
+                    title += "</div>";
+                } else {
+                    title += `<div class='beat-message'>${beat.msg}</div>`;
+                }
+            }
+
+            return title;
         },
 
+        /**
+         * 检查心跳是否为空
+         * @param {object|number} beat 心跳数据
+         * @returns {boolean} 是否为空
+         */
+        isEmpty(beat) {
+            return beat === 0;
+        },
+
+        /**
+         * 显示tooltip
+         * @param {object} beat 心跳数据
+         * @param {number} index 心跳索引
+         * @param {Event} event 鼠标事件
+         * @returns {void}
+         */
+        showTooltip(beat, index, event) {
+            // 清除之前的隐藏定时器
+            if (this.tooltipHideTimer) {
+                clearTimeout(this.tooltipHideTimer);
+                this.tooltipHideTimer = null;
+            }
+
+            if (this.isEmpty(beat)) {
+                return;
+            }
+
+            // 获取鼠标悬停元素
+            const rect = event.currentTarget.getBoundingClientRect();
+
+            this.activeBeatIndex = index;
+            this.activeTooltip = this.getBeatTitle(beat);
+
+            // 计算tooltip位置
+            this.tooltipPosition = {
+                x: rect.left + rect.width / 2,
+                y: rect.top - 10,
+            };
+        },
+
+        /**
+         * 开始隐藏tooltip的倒计时
+         * @returns {void}
+         */
+        startHideTooltip() {
+            // 设置2秒后隐藏tooltip
+            this.tooltipHideTimer = setTimeout(() => {
+                this.activeTooltip = null;
+                this.activeBeatIndex = null;
+            }, 2000);
+        },
     },
 };
 </script>
@@ -286,6 +381,8 @@ export default {
 .hp-bar-big {
     .beat-hover-area {
         display: inline-block;
+        cursor: pointer;
+        position: relative;
 
         &:not(.empty):hover {
             transition: all ease-in-out 0.15s;
@@ -318,12 +415,51 @@ export default {
                 background-color: $maintenance;
             }
         }
+
+        .beat-tooltip {
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            white-space: nowrap;
+            z-index: 9999;
+            margin-bottom: 5px;
+            pointer-events: none;
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+
+            &:after {
+                content: '';
+                position: absolute;
+                top: 100%;
+                left: 50%;
+                margin-left: -5px;
+                border-width: 5px;
+                border-style: solid;
+                border-color: rgba(0, 0, 0, 0.8) transparent transparent transparent;
+            }
+        }
     }
 }
 
 .dark {
     .hp-bar-big .beat.empty {
         background-color: #848484;
+    }
+
+    .beat-tooltip {
+        background-color: rgba(255, 255, 255, 0.9) !important;
+        color: #333 !important;
+
+        &:after {
+            border-color: rgba(255, 255, 255, 0.9) transparent transparent transparent !important;
+        }
     }
 }
 
@@ -342,6 +478,97 @@ export default {
 
     .dark & {
         background-color: #333;
+    }
+}
+
+.global-beat-tooltip {
+    position: fixed;
+    transform: translateX(-50%) translateY(-100%);
+    background-color: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    z-index: 9999;
+    margin-bottom: 5px;
+    pointer-events: none;
+    max-width: 300px;
+    white-space: normal;
+
+    &:after {
+        content: '';
+        position: absolute;
+        top: 100%;
+        left: 50%;
+        margin-left: -5px;
+        border-width: 5px;
+        border-style: solid;
+        border-color: rgba(0, 0, 0, 0.8) transparent transparent transparent;
+    }
+
+    :deep(.status-up) {
+        color: #22c55e;
+        font-weight: bold;
+    }
+
+    :deep(.status-down) {
+        color: #ef4444;
+        font-weight: bold;
+    }
+
+    :deep(.status-pending) {
+        color: #f59e0b;
+        font-weight: bold;
+    }
+
+    :deep(.status-maintenance) {
+        color: #3b82f6;
+        font-weight: bold;
+    }
+
+    :deep(.beat-message) {
+        display: block;
+        margin-top: 4px;
+        font-style: italic;
+    }
+
+    :deep(.beat-message-container) {
+        display: block;
+        margin-top: 4px;
+    }
+
+    :deep(.beat-message-item) {
+        display: block;
+        margin-top: 2px;
+        font-style: italic;
+        padding-left: 8px;
+    }
+}
+
+.dark {
+    .global-beat-tooltip {
+        background-color: rgba(255, 255, 255, 0.9) !important;
+        color: #333 !important;
+
+        &:after {
+            border-color: rgba(255, 255, 255, 0.9) transparent transparent transparent !important;
+        }
+
+        :deep(.status-up) {
+            color: #16a34a;
+        }
+
+        :deep(.status-down) {
+            color: #dc2626;
+        }
+
+        :deep(.status-pending) {
+            color: #d97706;
+        }
+
+        :deep(.status-maintenance) {
+            color: #2563eb;
+        }
     }
 }
 </style>

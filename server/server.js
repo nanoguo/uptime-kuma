@@ -1522,6 +1522,11 @@ let needSetup = false;
                     monitorID
                 ]);
 
+                // 清除归档数据
+                // await R.exec("DELETE FROM heartbeat_archive WHERE monitor_id = ?", [
+                //     monitorID
+                // ]);
+
                 await sendHeartbeatList(socket, monitorID, true, true);
 
                 callback({
