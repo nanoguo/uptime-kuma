@@ -574,6 +574,45 @@ router.get("/api/badge/:id/response", cache("5 minutes"), async (request, respon
     }
 });
 
+// SLA details for a monitor
+router.get("/api/monitor/:id/sla/:duration", cache("1 minutes"), async (request, response) => {
+    allowDevAllOrigin(response);
+    try {
+        const id = parseInt(request.params.id, 10);
+        const duration = request.params.duration; // e.g. 24h/30d
+        const monitor = await R.findOne("monitor", " id = ? ", [ id ]);
+        if (!monitor) {
+            sendHttpError(response, "Monitor not found");
+            return;
+        }
+        const uptimeCalculator = await UptimeCalculator.getUptimeCalculator(id);
+        const excludeMaintenance = Boolean(monitor.sla_exclude_maintenance);
+        const { ratio, breakdown } = uptimeCalculator.getSLAByDuration(duration, { excludeMaintenance });
+
+        const target = monitor.sla_target ?? null;
+        const period = monitor.sla_period ?? "calendar-month";
+        const totalUnits = breakdown.up + breakdown.down + (excludeMaintenance ? 0 : breakdown.maintenance);
+        const allowedError = (target != null) ? Math.max(0, (1 - target) * totalUnits) : null;
+        const consumedError = breakdown.down;
+        const remainingError = (allowedError != null) ? Math.max(0, allowedError - consumedError) : null;
+
+        response.json({
+            monitorID: id,
+            period,
+            target,
+            achieved: ratio,
+            breakdown,
+            errorBudget: {
+                allowed: allowedError,
+                consumed: consumedError,
+                remaining: remainingError,
+            },
+        });
+    } catch (error) {
+        sendHttpError(response, error.message);
+    }
+});
+
 /**
  * Determines the status of the next beat in the push route handling.
  * @param {string} status - The reported new status.

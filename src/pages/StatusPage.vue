@@ -789,10 +789,11 @@ export default {
             // If editMode, it will use the data from websocket.
             if (! this.editMode) {
                 axios.get("/api/status-page/heartbeat/" + this.slug + "/" + this.statusDuration).then((res) => {
-                    const { heartbeatList, uptimeList } = res.data;
+                    const { heartbeatList, uptimeList, slaList } = res.data;
 
                     this.$root.heartbeatList = heartbeatList;
                     this.$root.uptimeList = uptimeList;
+                    this.$root.slaList = slaList || {};
 
                     const heartbeatIds = Object.keys(heartbeatList);
                     const downMonitors = heartbeatIds.reduce((downMonitorsAmount, currentId) => {

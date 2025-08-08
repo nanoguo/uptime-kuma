@@ -155,6 +155,10 @@ class Monitor extends BeanModel {
             snmpVersion: this.snmpVersion,
             rabbitmqNodes: JSON.parse(this.rabbitmqNodes),
             conditions: JSON.parse(this.conditions),
+            sla_target: this.sla_target,
+            sla_period: this.sla_period,
+            sla_exclude_maintenance: Boolean(this.sla_exclude_maintenance),
+            sla_timezone: this.sla_timezone,
         };
 
         if (includeSensitiveData) {

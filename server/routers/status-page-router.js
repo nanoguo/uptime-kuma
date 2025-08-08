@@ -71,6 +71,7 @@ router.get("/api/status-page/heartbeat/:slug/:duration", cache("1 minutes"), asy
     try {
         let heartbeatList = {};
         let uptimeList = {};
+        let slaList = {};
 
         let slug = request.params.slug;
         slug = slug.toLowerCase();
@@ -108,11 +109,20 @@ router.get("/api/status-page/heartbeat/:slug/:duration", cache("1 minutes"), asy
 
             const uptimeCalculator = await UptimeCalculator.getUptimeCalculator(monitorID);
             uptimeList[`${monitorID}_24`] = uptimeCalculator.get24Hour().uptime;
+
+            // SLA for the same 24h window on status page
+            const monitorBean = await R.findOne("monitor", " id = ? ", [ monitorID ]);
+            const excludeMaintenance = monitorBean?.sla_exclude_maintenance === 1 || monitorBean?.sla_exclude_maintenance === true;
+            const target = monitorBean?.sla_target ?? null;
+            const sla = uptimeCalculator.getSLAByDuration("24h", { excludeMaintenance });
+            slaList[`${monitorID}_24`] = { achieved: sla.ratio,
+                target };
         }
 
         response.json({
             heartbeatList,
-            uptimeList
+            uptimeList,
+            slaList,
         });
 
     } catch (error) {

@@ -831,6 +831,139 @@ class UptimeCalculator {
     }
 
     /**
+     * Return breakdown totals for a given range
+     * @param {number} num count of windows
+     * @param {"day"|"hour"|"minute"} type window type
+     * @returns {{up:number,down:number,maintenance:number,avgPing:number|null}}
+     */
+    getBreakdown(num, type = "day") {
+        if (type === "hour" && num > 24 * 30) {
+            throw new Error("The maximum number of hours is 720");
+        }
+        if (type === "minute" && num > 24 * 60) {
+            throw new Error("The maximum number of minutes is 1440");
+        }
+
+        let key = this.getKey(this.getCurrentDate(), type);
+        let endTimestamp;
+        switch (type) {
+            case "day":
+                endTimestamp = key - 86400 * (num - 1);
+                break;
+            case "hour":
+                endTimestamp = key - 3600 * (num - 1);
+                break;
+            case "minute":
+                endTimestamp = key - 60 * (num - 1);
+                break;
+            default:
+                throw new Error("Invalid type");
+        }
+
+        let result = { up: 0,
+            down: 0,
+            maintenance: 0,
+            avgPing: null };
+        let totalPing = 0;
+
+        while (key >= endTimestamp) {
+            let data;
+            switch (type) {
+                case "day":
+                    data = this.dailyUptimeDataList[key];
+                    break;
+                case "hour":
+                    data = this.hourlyUptimeDataList[key];
+                    break;
+                case "minute":
+                    data = this.minutelyUptimeDataList[key];
+                    break;
+                default:
+                    throw new Error("Invalid type");
+            }
+
+            if (data) {
+                result.up += data.up || 0;
+                result.down += data.down || 0;
+                result.maintenance += data.maintenance || 0;
+                if (data.up && data.avgPing) {
+                    totalPing += data.avgPing * data.up;
+                }
+            }
+
+            switch (type) {
+                case "day":
+                    key -= 86400;
+                    break;
+                case "hour":
+                    key -= 3600;
+                    break;
+                case "minute":
+                    key -= 60;
+                    break;
+                default:
+                    throw new Error("Invalid type");
+            }
+        }
+
+        if (result.up > 0) {
+            result.avgPing = totalPing / result.up;
+        }
+        return result;
+    }
+
+    /**
+     * Parse a duration like 24h/30d/7w/1M/1y to num/type
+     * @param {string} duration
+     * @returns {{num:number,type:"minute"|"hour"|"day"}}
+     */
+    parseDuration(duration) {
+        const durationNumStr = duration.slice(0, -1);
+        if (!/^[0-9]+$/.test(durationNumStr)) {
+            throw new Error(`Invalid duration: ${duration}`);
+        }
+        const num = Number(durationNumStr);
+        const unit = duration.slice(-1);
+        switch (unit) {
+            case "m":
+                return { num,
+                    type: "minute" };
+            case "h":
+                return { num,
+                    type: "hour" };
+            case "d":
+                return { num,
+                    type: "day" };
+            case "w":
+                return { num: 7 * num,
+                    type: "day" };
+            case "M":
+                return { num: 30 * num,
+                    type: "day" };
+            case "y":
+                return { num: 365 * num,
+                    type: "day" };
+            default:
+                throw new Error(`Unsupported unit (${unit}) for duration ${duration}`);
+        }
+    }
+
+    /**
+     * SLA ratio by duration with optional maintenance exclusion
+     * @param {string} duration e.g. 24h/30d
+     * @param {{excludeMaintenance?:boolean}} options
+     * @returns {{ratio:number,breakdown:{up:number,down:number,maintenance:number,avgPing:number|null}}}
+     */
+    getSLAByDuration(duration, { excludeMaintenance = true } = {}) {
+        const { num, type } = this.parseDuration(duration);
+        const breakdown = this.getBreakdown(num, type);
+        const denominator = breakdown.up + breakdown.down + (excludeMaintenance ? 0 : breakdown.maintenance);
+        const ratio = denominator === 0 ? 0 : (breakdown.up / (breakdown.up + breakdown.down || 1));
+        return { ratio,
+            breakdown };
+    }
+
+    /**
      * @returns {dayjs.Dayjs} Current datetime in UTC
      */
     getCurrentDate() {

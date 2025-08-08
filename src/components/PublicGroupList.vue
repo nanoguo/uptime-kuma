@@ -39,6 +39,7 @@
                                             <font-awesome-icon v-if="editMode" icon="times" class="action remove me-3" @click="removeMonitor(group.index, monitor.index)" />
 
                                             <Uptime :monitor="monitor.element" type="24" :pill="true" />
+                                            <SLAChip :monitor-id="monitor.element.id" :pill="true" />
                                             <a
                                                 v-if="showLink(monitor)"
                                                 :href="monitor.element.url"
@@ -90,6 +91,7 @@ import MonitorSettingDialog from "./MonitorSettingDialog.vue";
 import Draggable from "vuedraggable";
 import HeartbeatBar from "./HeartbeatBar.vue";
 import Uptime from "./Uptime.vue";
+import SLAChip from "./SLAChip.vue";
 import Tag from "./Tag.vue";
 
 export default {
@@ -99,6 +101,7 @@ export default {
         HeartbeatBar,
         Uptime,
         Tag,
+        SLAChip,
     },
     props: {
         /** Are we in edit mode? */
