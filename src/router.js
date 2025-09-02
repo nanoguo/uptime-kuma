@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from "vue-router";
 
 import EmptyLayout from "./layouts/EmptyLayout.vue";
 import Layout from "./layouts/Layout.vue";
+import MinimalLayout from "./layouts/MinimalLayout.vue";
 import Dashboard from "./pages/Dashboard.vue";
 import DashboardHome from "./pages/DashboardHome.vue";
 import Details from "./pages/Details.vue";
@@ -32,6 +33,11 @@ const Security = () => import("./components/settings/Security.vue");
 import Proxies from "./components/settings/Proxies.vue";
 import About from "./components/settings/About.vue";
 import RemoteBrowsers from "./components/settings/RemoteBrowsers.vue";
+const ReportsSettings = () => import("./components/settings/Reports.vue");
+const ReportsPreview = () => import("./pages/ReportsPreview.vue");
+const DeploymentConfig = () => import("./components/settings/DeploymentConfig.vue");
+const PublicStatusPage = () => import("./pages/PublicStatusPage.vue");
+const CustomerDashboard = () => import("./pages/CustomerDashboard.vue");
 
 const routes = [
     {
@@ -136,7 +142,19 @@ const routes = [
                                 path: "about",
                                 component: About,
                             },
+                            {
+                                path: "reports",
+                                component: ReportsSettings,
+                            },
+                            {
+                                path: "deployment-config",
+                                component: DeploymentConfig,
+                            },
                         ]
+                    },
+                    {
+                        path: "/reports",
+                        component: ReportsPreview,
                     },
                     {
                         path: "/manage-status-page",
@@ -185,6 +203,50 @@ const routes = [
     {
         path: "/status/:slug",
         component: StatusPage,
+    },
+    // External Customer Pages (Public Access)
+    {
+        path: "/public-status",
+        component: MinimalLayout,
+        children: [
+            {
+                path: "",
+                component: PublicStatusPage,
+                meta: {
+                    title: "Service Status",
+                    public: true
+                }
+            }
+        ]
+    },
+    {
+        path: "/public-status/:slug",
+        component: MinimalLayout,
+        children: [
+            {
+                path: "",
+                component: PublicStatusPage,
+                meta: {
+                    title: "Service Status",
+                    public: true
+                }
+            }
+        ]
+    },
+    {
+        path: "/customer-dashboard",
+        component: MinimalLayout,
+        children: [
+            {
+                path: "",
+                component: CustomerDashboard,
+                meta: {
+                    title: "Service Dashboard",
+                    public: true,
+                    requiresAuth: false
+                }
+            }
+        ]
     },
     {
         path: "/:pathMatch(.*)*",

@@ -144,6 +144,7 @@ const { dockerSocketHandler } = require("./socket-handlers/docker-socket-handler
 const { maintenanceSocketHandler } = require("./socket-handlers/maintenance-socket-handler");
 const { apiKeySocketHandler } = require("./socket-handlers/api-key-socket-handler");
 const { generalSocketHandler } = require("./socket-handlers/general-socket-handler");
+const { deploymentConfigSocketHandler } = require("./socket-handlers/deployment-config-socket-handler");
 const { Settings } = require("./settings");
 const apicache = require("./modules/apicache");
 const { resetChrome } = require("./monitor-types/real-browser-monitor-type");
@@ -312,6 +313,9 @@ let needSetup = false;
     // Status Page Router
     const statusPageRouter = require("./routers/status-page-router");
     app.use(statusPageRouter);
+
+    const metricsRouter = require("./routers/metrics-router");
+    app.use(metricsRouter);
 
     // Universal Route Handler, must be at the end of all express routes.
     app.get("*", async (_request, response) => {
@@ -874,6 +878,11 @@ let needSetup = false;
                 bean.rabbitmqUsername = monitor.rabbitmqUsername;
                 bean.rabbitmqPassword = monitor.rabbitmqPassword;
                 bean.conditions = JSON.stringify(monitor.conditions);
+                // SLO fields
+                bean.monthly_slo_target = monitor.monthly_slo_target ?? null;
+                bean.quarterly_slo_target = monitor.quarterly_slo_target ?? null;
+                bean.sla_exclude_maintenance = monitor.sla_exclude_maintenance ? 1 : 0;
+                bean.sla_timezone = monitor.sla_timezone ?? null;
 
                 bean.validate();
 
@@ -1580,6 +1589,7 @@ let needSetup = false;
         remoteBrowserSocketHandler(socket);
         generalSocketHandler(socket, server);
         chartSocketHandler(socket);
+        deploymentConfigSocketHandler(socket);
 
         log.debug("server", "added all socket handlers");
 

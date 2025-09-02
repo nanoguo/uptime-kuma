@@ -1,4 +1,7 @@
 const dayjs = require("dayjs");
+// Ensure tz utilities are available in this module
+dayjs.extend(require("dayjs/plugin/utc"));
+dayjs.extend(require("./modules/dayjs/plugin/timezone"));
 const { UP, MAINTENANCE, DOWN, PENDING } = require("../src/util");
 const { LimitQueue } = require("./utils/limit-queue");
 const { log } = require("../src/util");
@@ -958,7 +961,24 @@ class UptimeCalculator {
         const { num, type } = this.parseDuration(duration);
         const breakdown = this.getBreakdown(num, type);
         const denominator = breakdown.up + breakdown.down + (excludeMaintenance ? 0 : breakdown.maintenance);
-        const ratio = denominator === 0 ? 0 : (breakdown.up / (breakdown.up + breakdown.down || 1));
+        const ratio = denominator === 0 ? 0 : (breakdown.up / denominator);
+        return { ratio,
+            breakdown };
+    }
+
+    /**
+     * SLA for current calendar month (UTC month start -> now)
+     * @param {{excludeMaintenance?:boolean}} options
+     * @returns {{ratio:number,breakdown:{up:number,down:number,maintenance:number,avgPing:number|null}}}
+     */
+    getSLAByCalendarMonth({ excludeMaintenance = true, timezone = "Asia/Shanghai" } = {}) {
+        const now = this.getCurrentDate();
+        // Calculate natural month window in given timezone, then map to day-count for breakdown
+        const monthStart = now.tz(timezone).startOf("month");
+        const days = now.tz(timezone).startOf("day").diff(monthStart, "day") + 1;
+        const breakdown = this.getBreakdown(days, "day");
+        const denominator = breakdown.up + breakdown.down + (excludeMaintenance ? 0 : breakdown.maintenance);
+        const ratio = denominator === 0 ? 0 : (breakdown.up / denominator);
         return { ratio,
             breakdown };
     }

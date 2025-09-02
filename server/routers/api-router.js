@@ -11,6 +11,9 @@ const { R } = require("redbean-node");
 const apicache = require("../modules/apicache");
 const Monitor = require("../model/monitor");
 const dayjs = require("dayjs");
+// Enable UTC & timezone utilities for report time windows
+dayjs.extend(require("dayjs/plugin/utc"));
+dayjs.extend(require("../modules/dayjs/plugin/timezone"));
 const { UP, MAINTENANCE, DOWN, PENDING, flipStatus, log, badgeConstants } = require("../../src/util");
 const StatusPage = require("../model/status_page");
 const { UptimeKumaServer } = require("../uptime-kuma-server");
@@ -18,6 +21,10 @@ const { makeBadge } = require("badge-maker");
 const { Prometheus } = require("../prometheus");
 const Database = require("../database");
 const { UptimeCalculator } = require("../uptime-calculator");
+const { Settings } = require("../settings");
+const { DeploymentMiddleware } = require("../middleware/deployment-middleware");
+// const Cron = require("croner");
+// const nodemailer = require("nodemailer");
 
 let router = express.Router();
 
@@ -42,6 +49,59 @@ router.get("/api/entry-page", async (request, response) => {
         result.entryPage = server.entryPage;
     }
     response.json(result);
+});
+
+// Public deployment configuration endpoint (no auth required)
+router.get("/api/config/deployment", cache("1 minutes"), async (request, response) => {
+    allowDevAllOrigin(response);
+    try {
+        const mode = await Settings.get("deploymentMode") || "internal";
+        const features = await Settings.get("deploymentFeatures") || {
+            showSLI: true,
+            showSLO: true,
+            showSLA: true,
+            timeRanges: [ "90m", "24h", "90d" ], // Internal: 90m/24h for SLI/SLO, 90d for SLA
+            defaultView: "dashboard"
+        };
+        const publicAccess = await Settings.get("deploymentPublicAccess") || {
+            enabled: false,
+            allowAnonymous: false,
+            customDomain: null
+        };
+
+        // Only return public-safe configuration data
+        response.json({
+            mode,
+            features: {
+                showSLI: features.showSLI,
+                showSLO: features.showSLO,
+                showSLA: features.showSLA,
+                timeRanges: features.timeRanges,
+                defaultView: features.defaultView
+            },
+            publicAccess: {
+                enabled: publicAccess.enabled,
+                allowAnonymous: publicAccess.allowAnonymous
+            }
+        });
+    } catch (error) {
+        log.error("api", "Error getting deployment config:", error);
+        // Return safe defaults on error
+        response.json({
+            mode: "internal",
+            features: {
+                showSLI: true,
+                showSLO: true,
+                showSLA: true,
+                timeRanges: [ "90m", "24h", "90d" ], // Internal: 90m/24h for SLI/SLO, 90d for SLA
+                defaultView: "dashboard"
+            },
+            publicAccess: {
+                enabled: false,
+                allowAnonymous: false
+            }
+        });
+    }
 });
 
 router.all("/api/push/:pushToken", async (request, response) => {
@@ -575,43 +635,48 @@ router.get("/api/badge/:id/response", cache("5 minutes"), async (request, respon
 });
 
 // SLA details for a monitor
-router.get("/api/monitor/:id/sla/:duration", cache("1 minutes"), async (request, response) => {
-    allowDevAllOrigin(response);
-    try {
-        const id = parseInt(request.params.id, 10);
-        const duration = request.params.duration; // e.g. 24h/30d
-        const monitor = await R.findOne("monitor", " id = ? ", [ id ]);
-        if (!monitor) {
-            sendHttpError(response, "Monitor not found");
-            return;
+router.get("/api/monitor/:id/sla/:duration",
+    cache("1 minutes"),
+    DeploymentMiddleware.injectDeploymentConfig,
+    DeploymentMiddleware.checkFeatureEnabled("showSLA"),
+    DeploymentMiddleware.validateTimeRange("duration"),
+    async (request, response) => {
+        allowDevAllOrigin(response);
+        try {
+            const id = parseInt(request.params.id, 10);
+            const duration = request.params.duration; // e.g. 24h/30d
+            const monitor = await R.findOne("monitor", " id = ? ", [ id ]);
+            if (!monitor) {
+                sendHttpError(response, "Monitor not found");
+                return;
+            }
+            const uptimeCalculator = await UptimeCalculator.getUptimeCalculator(id);
+            const excludeMaintenance = Boolean(monitor.sla_exclude_maintenance);
+            const { ratio, breakdown } = uptimeCalculator.getSLAByDuration(duration, { excludeMaintenance });
+
+            const target = monitor.sla_target ?? null;
+            const period = monitor.sla_period ?? "calendar-month";
+            const totalUnits = breakdown.up + breakdown.down + (excludeMaintenance ? 0 : breakdown.maintenance);
+            const allowedError = (target != null) ? Math.max(0, (1 - target) * totalUnits) : null;
+            const consumedError = breakdown.down;
+            const remainingError = (allowedError != null) ? Math.max(0, allowedError - consumedError) : null;
+
+            response.json({
+                monitorID: id,
+                period,
+                target,
+                achieved: ratio,
+                breakdown,
+                errorBudget: {
+                    allowed: allowedError,
+                    consumed: consumedError,
+                    remaining: remainingError,
+                },
+            });
+        } catch (error) {
+            sendHttpError(response, error.message);
         }
-        const uptimeCalculator = await UptimeCalculator.getUptimeCalculator(id);
-        const excludeMaintenance = Boolean(monitor.sla_exclude_maintenance);
-        const { ratio, breakdown } = uptimeCalculator.getSLAByDuration(duration, { excludeMaintenance });
-
-        const target = monitor.sla_target ?? null;
-        const period = monitor.sla_period ?? "calendar-month";
-        const totalUnits = breakdown.up + breakdown.down + (excludeMaintenance ? 0 : breakdown.maintenance);
-        const allowedError = (target != null) ? Math.max(0, (1 - target) * totalUnits) : null;
-        const consumedError = breakdown.down;
-        const remainingError = (allowedError != null) ? Math.max(0, allowedError - consumedError) : null;
-
-        response.json({
-            monitorID: id,
-            period,
-            target,
-            achieved: ratio,
-            breakdown,
-            errorBudget: {
-                allowed: allowedError,
-                consumed: consumedError,
-                remaining: remainingError,
-            },
-        });
-    } catch (error) {
-        sendHttpError(response, error.message);
-    }
-});
+    });
 
 /**
  * Determines the status of the next beat in the push route handling.
@@ -668,3 +733,339 @@ function determineStatus(status, previousHeartbeat, maxretries, isUpsideDown, be
 }
 
 module.exports = router;
+
+/**
+ * Report endpoints: weekly/monthly for a status page (slug)
+ * Example:
+ * GET /api/report/status-page/:slug?range=weekly&window=rolling&tz=Asia/Shanghai
+ *   - range: weekly | monthly (default: weekly)
+ *   - window:
+ *       weekly: rolling | calendar (calendar = 本周一 00:00:00 至今，按 tz)
+ *       monthly: rolling | calendar (calendar = 本月 00:00:00 至今，按 tz)
+ *   - tz: IANA timezone id, default UTC
+ *   - excludeMaintenance: 0|1 覆盖每个监控的设置（默认 undefined=按监控设置）
+ */
+// Preflight CORS for report API
+router.options("/api/report/status-page/:slug", (request, response) => {
+    const origin = request.headers.origin || "*";
+    log.info("report", `OPTIONS /api/report/status-page/${request.params.slug || "(no-slug)"} from ${origin}`);
+    response.header("Access-Control-Allow-Origin", origin);
+    response.header("Vary", "Origin");
+    response.header("Access-Control-Allow-Credentials", "true");
+    response.header("Access-Control-Allow-Methods", "GET, OPTIONS");
+    response.header("Access-Control-Allow-Headers", request.headers["access-control-request-headers"] || "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+    response.header("Access-Control-Max-Age", "600");
+    response.sendStatus(204);
+});
+
+router.get("/api/report/status-page/:slug", cache("30 seconds"), async (request, response) => {
+    const origin = request.headers.origin || "*";
+    response.header("Access-Control-Allow-Origin", origin);
+    response.header("Vary", "Origin");
+    response.header("Access-Control-Allow-Credentials", "true");
+    try {
+        const slugParam = String(request.params.slug || "").toLowerCase();
+        log.info("report", `GET /api/report/status-page/${slugParam} range=${request.query.range} window=${request.query.window} tz=${request.query.tz} excludeMaintenance=${request.query.excludeMaintenance}`);
+        const range = request.query.range === "quarterly" ? "quarterly" :
+            request.query.range === "monthly" ? "monthly" : "monthly"; // 默认月报
+        const windowType = (request.query.window === "calendar") ? "calendar" : "rolling";
+        const tz = request.query.tz || "Asia/Shanghai";
+        const overrideExcludeMaintenance = request.query.excludeMaintenance;
+
+        // Validate status page
+        const statusPageID = await StatusPage.slugToID(slugParam);
+        if (!statusPageID) {
+            sendHttpError(response, "Status Page Not Found");
+            return;
+        }
+
+        // Get public monitors under this status page
+        const monitorIDList = await R.getCol(`
+            SELECT monitor_group.monitor_id FROM monitor_group, \`group\`
+            WHERE monitor_group.group_id = \`group\`.id
+            AND public = 1
+            AND \`group\`.status_page_id = ?
+        `, [ statusPageID ]);
+
+        // Resolve time window
+        const nowUtc = dayjs.utc();
+        const nowTz = nowUtc.tz(tz);
+        let startUtc = nowUtc.subtract(30, "day"); // 默认月报
+        let endUtc = nowUtc;
+        let windowLabel = "rolling-30d";
+
+        if (range === "monthly") {
+            // 月报 - 30天窗口
+            if (windowType === "calendar") {
+                const startTz = nowTz.startOf("month");
+                startUtc = startTz.utc();
+                endUtc = nowTz.utc();
+                windowLabel = "calendar-month";
+            } else {
+                startUtc = nowUtc.subtract(30, "day");
+                endUtc = nowUtc;
+                windowLabel = "rolling-30d";
+            }
+        } else if (range === "quarterly") {
+            // 季度报告 - 90天窗口
+            if (windowType === "calendar") {
+                const startTz = nowTz.startOf("quarter");
+                startUtc = startTz.utc();
+                endUtc = nowTz.utc();
+                windowLabel = "calendar-quarter";
+            } else {
+                startUtc = nowUtc.subtract(90, "day");
+                endUtc = nowUtc;
+                windowLabel = "rolling-90d";
+            }
+        }
+
+        // Helpers
+        const computeSLAForMonitor = async (monitorID, monitorBean) => {
+            const uptimeCalculator = await UptimeCalculator.getUptimeCalculator(monitorID);
+            const useExcludeMaintenance = (overrideExcludeMaintenance === undefined || overrideExcludeMaintenance === null)
+                ? Boolean(monitorBean?.sla_exclude_maintenance)
+                : (String(overrideExcludeMaintenance) === "1" || String(overrideExcludeMaintenance) === "true");
+
+            // 所有监控项都包含在报告中，自动使用对应的SLO目标
+
+            let achieved = 0;
+            let breakdown = { up: 0,
+                down: 0,
+                maintenance: 0,
+                avgPing: null };
+            if (range === "monthly" && windowType === "calendar") {
+                const res = uptimeCalculator.getSLAByCalendarMonth({ excludeMaintenance: useExcludeMaintenance,
+                    timezone: monitorBean?.sla_timezone || tz });
+                achieved = res.ratio;
+                breakdown = res.breakdown;
+                // 日历月：使用当前月的实际天数
+                const currentMonth = nowTz.daysInMonth();
+                breakdown.theoreticalTotal = currentMonth * 24 * 60;
+            } else if (range === "quarterly" && windowType === "calendar") {
+                // 季度报告 - 自然季度计算
+                const res = uptimeCalculator.getSLAByCalendarQuarter({ excludeMaintenance: useExcludeMaintenance,
+                    timezone: monitorBean?.sla_timezone || tz });
+                achieved = res.ratio;
+                breakdown = res.breakdown;
+                // 日历季度：使用90天作为理论值（近似）
+                breakdown.theoreticalTotal = 90 * 24 * 60;
+            } else {
+                // compute days count for rolling windows
+                let numDays;
+                if (range === "monthly") {
+                    if (windowType === "calendar") {
+                        numDays = nowUtc.startOf("day").diff(startUtc.startOf("day"), "day") + 1;
+                    } else {
+                        numDays = 30; // 月报：30天滚动窗口
+                    }
+                } else if (range === "quarterly") {
+                    if (windowType === "calendar") {
+                        numDays = nowUtc.startOf("day").diff(startUtc.startOf("day"), "day") + 1;
+                    } else {
+                        numDays = 90; // 季度报告：90天滚动窗口
+                    }
+                }
+                const br = uptimeCalculator.getBreakdown(numDays, "day");
+                breakdown = br;
+                const denominator = br.up + br.down + (useExcludeMaintenance ? 0 : br.maintenance);
+                achieved = denominator === 0 ? 0 : (br.up / denominator);
+
+                // 对于Error Budget计算，使用完整的理论时间窗口，而不是实际监控时间
+                // 这样确保Error Budget基于完整的SLO周期计算
+                const theoreticalTotalMinutes = numDays * 24 * 60; // 理论总分钟数
+                breakdown.theoreticalTotal = theoreticalTotalMinutes;
+            }
+
+            // Error budget - 根据报告类型选择对应的SLO目标
+            let target = null;
+            if (range === "monthly") {
+                // 月报：优先使用monthly_slo_target，否则回退到sla_target
+                target = monitorBean?.monthly_slo_target ?? monitorBean?.sla_target ?? null;
+            } else if (range === "quarterly") {
+                // 季度报告：优先使用quarterly_slo_target，否则回退到sla_target
+                target = monitorBean?.quarterly_slo_target ?? monitorBean?.sla_target ?? null;
+            } else {
+                // 其他情况使用通用目标
+                target = monitorBean?.sla_target ?? null;
+            }
+            // 使用理论总时间计算Error Budget，确保基于完整SLO周期
+            const denominatorForBudget = breakdown.theoreticalTotal || (breakdown.up + breakdown.down + ( ( (overrideExcludeMaintenance === undefined || overrideExcludeMaintenance === null) ? !monitorBean?.sla_exclude_maintenance : !(String(overrideExcludeMaintenance) === "1" || String(overrideExcludeMaintenance) === "true") ) ? breakdown.maintenance : 0 ));
+            const allowedError = (target != null) ? Math.max(0, (1 - target) * denominatorForBudget) : null;
+            const consumedError = breakdown.down;
+            const remainingError = (allowedError != null) ? Math.max(0, allowedError - consumedError) : null;
+
+            return { achieved,
+                breakdown,
+                target,
+                errorBudget: { allowed: allowedError,
+                    consumed: consumedError,
+                    remaining: remainingError },
+                excludeMaintenance: useExcludeMaintenance };
+        };
+
+        const fetchHeartbeats = async (monitorID, startISO, endISO) => {
+            const rows = await R.getAll(`
+                SELECT time, status, msg FROM heartbeat
+                WHERE monitor_id = ? AND time >= ? AND time <= ?
+                ORDER BY time ASC
+            `, [ monitorID, startISO, endISO ]);
+            const prev = await R.getRow(`
+                SELECT time, status FROM heartbeat
+                WHERE monitor_id = ? AND time < ?
+                ORDER BY time DESC LIMIT 1
+            `, [ monitorID, startISO ]);
+            return { rows,
+                prev };
+        };
+
+        const computeSegments = (rows, prev, startISO, endISO) => {
+            const start = dayjs.utc(startISO);
+            const end = dayjs.utc(endISO);
+            const segments = { incidents: [],
+                maintenance: [] };
+            const Bad = new Set([ DOWN, PENDING ]);
+            let curState = prev ? prev.status : null;
+            let curStart = null;
+            const pushSeg = (type, segStart, segEnd, firstMsg) => {
+                if (!segStart || !segEnd || segEnd.isBefore(segStart)) {
+                    return;
+                }
+                segments[type].push({
+                    start: segStart.toISOString(),
+                    end: segEnd.toISOString(),
+                    durationSeconds: segEnd.diff(segStart, "second"),
+                    msg: firstMsg || null,
+                });
+            };
+            let firstMsg = null;
+            // Seed from start boundary
+            if (curState === MAINTENANCE) {
+                curStart = start;
+                firstMsg = null;
+            } else if (Bad.has(curState)) {
+                curStart = start;
+                firstMsg = null;
+            }
+            for (const row of rows) {
+                const t = dayjs.utc(row.time);
+                if (curState === MAINTENANCE) {
+                    if (row.status !== MAINTENANCE) {
+                        pushSeg("maintenance", curStart, t, firstMsg);
+                        curStart = null;
+                        firstMsg = null;
+                    }
+                } else if (Bad.has(curState)) {
+                    if (!Bad.has(row.status)) {
+                        pushSeg("incidents", curStart, t, firstMsg);
+                        curStart = null;
+                        firstMsg = null;
+                    }
+                }
+
+                // Transition into segment
+                if (curState !== MAINTENANCE && row.status === MAINTENANCE) {
+                    curStart = t;
+                    firstMsg = row.msg || null;
+                } else if (!Bad.has(curState) && Bad.has(row.status)) {
+                    curStart = t;
+                    firstMsg = row.msg || null;
+                }
+                curState = row.status;
+            }
+            // Close open at end
+            if (curStart) {
+                if (curState === MAINTENANCE) {
+                    pushSeg("maintenance", curStart, end, firstMsg);
+                } else if (Bad.has(curState)) {
+                    pushSeg("incidents", curStart, end, firstMsg);
+                }
+            }
+            return segments;
+        };
+
+        const startISO = startUtc.toISOString();
+        const endISO = endUtc.toISOString();
+
+        // Per-monitor data
+        const monitors = [];
+        for (const monitorID of monitorIDList) {
+            const monitorBean = await R.findOne("monitor", " id = ? ", [ monitorID ]);
+            const sla = await computeSLAForMonitor(monitorID, monitorBean);
+
+            // 跳过不匹配报告周期的监控项
+            if (!sla) {
+                continue;
+            }
+
+            const { rows, prev } = await fetchHeartbeats(monitorID, startISO, endISO);
+            const segs = computeSegments(rows, prev, startISO, endISO);
+            const downtimeSeconds = segs.incidents.reduce((s, x) => s + x.durationSeconds, 0);
+            const mttrSeconds = segs.incidents.length > 0 ? Math.round(downtimeSeconds / segs.incidents.length) : 0;
+            const maintenanceSeconds = segs.maintenance.reduce((s, x) => s + x.durationSeconds, 0);
+
+            monitors.push({
+                id: monitorID,
+                name: monitorBean?.name || String(monitorID),
+                target: sla.target,
+                achieved: sla.achieved,
+                breakdown: sla.breakdown,
+                errorBudget: sla.errorBudget,
+                excludeMaintenance: sla.excludeMaintenance,
+                incidents: segs.incidents,
+                maintenance: segs.maintenance,
+                totals: {
+                    incidents: segs.incidents.length,
+                    downtimeSeconds,
+                    mttrSeconds,
+                    maintenanceSeconds,
+                }
+            });
+        }
+
+        // Overview aggregation
+        const count = monitors.length;
+        const avg = (arr) => arr.length ? (arr.reduce((s, x) => s + x, 0) / arr.length) : 0;
+        const overview = {
+            monitors: count,
+            slaAverage: avg(monitors.map(m => m.achieved)),
+            incidents: {
+                count: monitors.reduce((s, m) => s + m.totals.incidents, 0),
+                totalDowntimeSeconds: monitors.reduce((s, m) => s + m.totals.downtimeSeconds, 0),
+                mttrSeconds: (() => {
+                    const allSegs = monitors.flatMap(m => m.incidents);
+                    if (!allSegs.length) {
+                        return 0;
+                    }
+                    const total = allSegs.reduce((s, x) => s + x.durationSeconds, 0);
+                    return Math.round(total / allSegs.length);
+                })(),
+                topByDuration: monitors
+                    .map(m => ({ monitorID: m.id,
+                        name: m.name,
+                        downtimeSeconds: m.totals.downtimeSeconds }))
+                    .sort((a, b) => b.downtimeSeconds - a.downtimeSeconds)
+                    .slice(0, 5),
+            },
+            maintenance: {
+                totalSeconds: monitors.reduce((s, m) => s + m.totals.maintenanceSeconds, 0),
+            }
+        };
+
+        response.json({
+            report: {
+                slug: slugParam,
+                range,
+                window: windowLabel,
+                timezone: tz,
+                generatedAt: nowUtc.toISOString(),
+                startedAt: startISO,
+                endedAt: endISO,
+            },
+            overview,
+            monitors,
+        });
+    } catch (error) {
+        sendHttpError(response, error.message);
+    }
+});

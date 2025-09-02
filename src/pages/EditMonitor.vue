@@ -650,6 +650,8 @@
                                 </div>
                             </div>
 
+
+
                             <div v-if="monitor.type === 'gamedig'" class="my-3 form-check">
                                 <input id="gamedig-guess-port" v-model="monitor.gamedigGivenPortOnly" :true-value="false" :false-value="true" class="form-check-input" type="checkbox">
                                 <label class="form-check-label" for="gamedig-guess-port">
@@ -975,6 +977,22 @@
                                 </template>
                             </template>
 
+                            <!-- SLA Configuration -->
+                            <h4 class="mt-5 mb-2">SLA 配置</h4>
+                            <div class="my-3">
+                                <label for="monthly_slo_target" class="form-label">月度SLO目标 (%)</label>
+                                <input id="monthly_slo_target" v-model.number="monthly_slo_target_percent" type="number" class="form-control" min="90" max="100" step="0.01">
+                            </div>
+                            <div class="my-3">
+                                <label for="quarterly_slo_target" class="form-label">季度SLO目标 (%)</label>
+                                <input id="quarterly_slo_target" v-model.number="quarterly_slo_target_percent" type="number" class="form-control" min="90" max="100" step="0.01">
+                            </div>
+                            <div class="my-3 form-check">
+                                <input id="sla_exclude_maintenance" v-model="monitor.sla_exclude_maintenance" class="form-check-input" type="checkbox">
+                                <label class="form-check-label" for="sla_exclude_maintenance">排除维护时间</label>
+                                <div class="form-text">计算SLO时是否排除计划维护时间</div>
+                            </div>
+
                             <!-- gRPC Options -->
                             <template v-if="monitor.type === 'grpc-keyword' ">
                                 <!-- Proto service enable TLS -->
@@ -1111,7 +1129,12 @@ const monitorDefaults = {
     rabbitmqNodes: [],
     rabbitmqUsername: "",
     rabbitmqPassword: "",
-    conditions: []
+    conditions: [],
+    // SLO
+    monthly_slo_target: 0.999,
+    quarterly_slo_target: 0.9995,
+    sla_exclude_maintenance: true,
+    sla_timezone: "Asia/Shanghai",
 };
 
 export default {
@@ -1157,6 +1180,24 @@ export default {
     },
 
     computed: {
+        // SLO目标显示为百分比，保存为小数
+        monthly_slo_target_percent: {
+            get() {
+                return this.monitor.monthly_slo_target ? this.monitor.monthly_slo_target * 100 : 99.9;
+            },
+            set(value) {
+                this.monitor.monthly_slo_target = value ? value / 100 : 0.999;
+            }
+        },
+        quarterly_slo_target_percent: {
+            get() {
+                return this.monitor.quarterly_slo_target ? this.monitor.quarterly_slo_target * 100 : 99.95;
+            },
+            set(value) {
+                this.monitor.quarterly_slo_target = value ? value / 100 : 0.9995;
+            }
+        },
+        
         ipRegex() {
 
             // Allow to test with simple dns server with port (127.0.0.1:5300)

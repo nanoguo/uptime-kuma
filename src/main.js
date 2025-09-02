@@ -21,6 +21,8 @@ import timezone from "./modules/dayjs/plugin/timezone";
 import utc from "dayjs/plugin/utc";
 import relativeTime from "dayjs/plugin/relativeTime";
 import { loadToastSettings } from "./util-frontend";
+import { DeploymentConfigPlugin } from "./modules/deployment-config.js";
+
 dayjs.extend(utc);
 dayjs.extend(timezone);
 dayjs.extend(relativeTime);
@@ -36,7 +38,8 @@ const app = createApp({
     ],
     data() {
         return {
-            appName: appName
+            appName: appName,
+            statusDuration: "90m", // 默认值，确保响应式
         };
     },
     render: () => h(App),
@@ -44,6 +47,7 @@ const app = createApp({
 
 app.use(router);
 app.use(i18n);
+app.use(DeploymentConfigPlugin);
 
 app.use(Toast, loadToastSettings());
 app.component("Editable", contenteditable);

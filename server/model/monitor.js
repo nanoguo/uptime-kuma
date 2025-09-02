@@ -50,6 +50,8 @@ class Monitor extends BeanModel {
             name: this.name,
             sendUrl: this.sendUrl,
             type: this.type,
+            // Expose non-sensitive SLA target for status page display
+            sla_target: this.sla_target,
         };
 
         if (this.sendUrl) {
@@ -159,6 +161,8 @@ class Monitor extends BeanModel {
             sla_period: this.sla_period,
             sla_exclude_maintenance: Boolean(this.sla_exclude_maintenance),
             sla_timezone: this.sla_timezone,
+            monthly_slo_target: this.monthly_slo_target,
+            quarterly_slo_target: this.quarterly_slo_target,
         };
 
         if (includeSensitiveData) {
@@ -333,6 +337,22 @@ class Monitor extends BeanModel {
         let retries = 0;
 
         this.prometheus = new Prometheus(this);
+
+        // Smart restart scheduling: avoid duplicate heartbeats after restart
+        const lastHeartbeat = await R.findOne("heartbeat", " monitor_id = ? ORDER BY time DESC", [ this.id ]);
+        let initialDelay = 0;
+
+        if (lastHeartbeat && this.type !== "push") {
+            const timeSinceLastBeat = dayjs().diff(dayjs.utc(lastHeartbeat.time), "second");
+            const nextScheduledTime = this.interval - timeSinceLastBeat;
+
+            if (nextScheduledTime > 0 && nextScheduledTime < this.interval) {
+                initialDelay = nextScheduledTime * 1000;
+                log.info("monitor", `[${this.name}] Smart restart: delaying ${nextScheduledTime}s to sync with schedule`);
+            } else {
+                log.info("monitor", `[${this.name}] Smart restart: starting immediately (${timeSinceLastBeat}s since last beat)`);
+            }
+        }
 
         const beat = async () => {
 
@@ -1024,12 +1044,19 @@ class Monitor extends BeanModel {
             }
         };
 
-        // Delay Push Type
+        // Smart scheduling for all monitor types
         if (this.type === "push") {
+            // Push monitors use their own scheduling logic
             setTimeout(() => {
                 safeBeat();
             }, this.interval * 1000);
+        } else if (initialDelay > 0) {
+            // Delay to sync with original schedule after restart
+            setTimeout(() => {
+                safeBeat();
+            }, initialDelay);
         } else {
+            // Start immediately
             safeBeat();
         }
     }

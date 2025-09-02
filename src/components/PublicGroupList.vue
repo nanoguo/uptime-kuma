@@ -33,37 +33,53 @@
                         <template #item="monitor">
                             <div class="item" data-testid="monitor">
                                 <div class="row">
-                                    <div class="col-4 col-md-6 small-padding">
+                                    <div :class="isExternalMode ? 'col-3' : 'col-3'" class="small-padding">
                                         <div class="info">
-                                            <font-awesome-icon v-if="editMode" icon="arrows-alt-v" class="action drag me-3" />
-                                            <font-awesome-icon v-if="editMode" icon="times" class="action remove me-3" @click="removeMonitor(group.index, monitor.index)" />
-
-                                            <Uptime :monitor="monitor.element" type="24" :pill="true" />
-                                            <SLAChip :monitor-id="monitor.element.id" :pill="true" />
-                                            <a
-                                                v-if="showLink(monitor)"
-                                                :href="monitor.element.url"
-                                                class="item-name"
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                data-testid="monitor-name"
-                                            >
-                                                {{ monitor.element.name }}
-                                            </a>
-                                            <p v-else class="item-name" data-testid="monitor-name"> {{ monitor.element.name }} </p>
-
-                                            <span
-                                                title="Setting"
-                                            >
+                                            <div class="monitor-header">
+                                                <font-awesome-icon v-if="editMode" icon="arrows-alt-v" class="action drag me-2" />
+                                                <font-awesome-icon v-if="editMode" icon="times" class="action remove me-2" @click="removeMonitor(group.index, monitor.index)" />
+                                                <a
+                                                    v-if="showLink(monitor)"
+                                                    :href="monitor.element.url"
+                                                    class="item-name"
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    data-testid="monitor-name"
+                                                >
+                                                    {{ monitor.element.name }}
+                                                </a>
+                                                <p v-else class="item-name" data-testid="monitor-name"> {{ monitor.element.name }} </p>
                                                 <font-awesome-icon
                                                     v-if="editMode"
                                                     :class="{'link-active': true, 'btn-link': true}"
-                                                    icon="cog" class="action me-3"
+                                                    icon="cog" class="action ms-2"
+                                                    title="Setting"
                                                     @click="$refs.monitorSettingDialog.show(group, monitor)"
                                                 />
-                                            </span>
+                                            </div>
+
+                                            <!-- 内部模式：垂直排列的徽章 -->
+                                            <div v-if="!isExternalMode" class="badges-vertical mt-2">
+                                                <div class="badge-row">
+                                                    <SLIChip
+                                                        :key="`sli-${monitor.element.id}-24h`"
+                                                        :monitor-id="monitor.element.id"
+                                                        key-suffix="24h"
+                                                        :pill="true"
+                                                    />
+                                                </div>
+                                                <div class="badge-row">
+                                                    <SLOChip
+                                                        :key="`slo-${monitor.element.id}`"
+                                                        :monitor-id="monitor.element.id"
+                                                        key-suffix="target"
+                                                        :pill="true"
+                                                    />
+                                                </div>
+                                                <!-- SLA徽章已移除：90分钟/24小时关注SLI，90天的uptime本身就是SLA -->
+                                            </div>
                                         </div>
-                                        <div class="extra-info">
+                                        <div class="extra-info mt-2">
                                             <div v-if="showCertificateExpiry && monitor.element.certExpiryDaysRemaining">
                                                 <Tag :item="{name: $t('Cert Exp.'), value: formattedCertExpiryMessage(monitor), color: certExpiryColor(monitor)}" :size="'sm'" />
                                             </div>
@@ -72,8 +88,8 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <div :key="$root.userHeartbeatBar" class="col-8 col-md-6">
-                                        <HeartbeatBar size="big" :monitor-id="monitor.element.id" />
+                                    <div :key="$root.userHeartbeatBar" :class="isExternalMode ? 'col-9' : 'col-9'">
+                                        <HeartbeatBar size="big" :monitor-id="monitor.element.id" :duration="$root.statusDuration" />
                                     </div>
                                 </div>
                             </div>
@@ -90,18 +106,19 @@
 import MonitorSettingDialog from "./MonitorSettingDialog.vue";
 import Draggable from "vuedraggable";
 import HeartbeatBar from "./HeartbeatBar.vue";
-import Uptime from "./Uptime.vue";
-import SLAChip from "./SLAChip.vue";
+import SLIChip from "./SLIChip.vue";
+import SLOChip from "./SLOChip.vue";
 import Tag from "./Tag.vue";
+import deploymentConfig from "../modules/deployment-config.js";
 
 export default {
     components: {
         MonitorSettingDialog,
         Draggable,
         HeartbeatBar,
-        Uptime,
         Tag,
-        SLAChip,
+        SLIChip,
+        SLOChip,
     },
     props: {
         /** Are we in edit mode? */
@@ -126,6 +143,11 @@ export default {
     computed: {
         showGroupDrag() {
             return (this.$root.publicGroupList.length >= 2);
+        },
+
+        isExternalMode() {
+            // Check if in external deployment mode for layout adjustments
+            return deploymentConfig.config?.mode === "external";
         }
     },
     created() {
@@ -271,6 +293,33 @@ export default {
 
 .bg-maintenance {
     background-color: $maintenance;
+}
+
+// 垂直徽章布局样式
+.badges-vertical {
+    .badge-row {
+        margin-bottom: 2px;
+
+        &:last-child {
+            margin-bottom: 0;
+        }
+    }
+}
+
+.monitor-header {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+
+    .item-name {
+        flex: 1;
+        min-width: 0;
+        margin: 0;
+    }
+
+    .action {
+        flex-shrink: 0;
+    }
 }
 
 </style>

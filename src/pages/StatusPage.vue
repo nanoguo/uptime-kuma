@@ -152,11 +152,19 @@
 
                 <!-- Title -->
                 <Editable v-model="config.title" tag="span" :contenteditable="editMode" :noNL="true" />
-                <div class="duration-selector ms-auto">
+
+                <!-- Internal Mode: Show technical time selector -->
+                <div v-if="isInternalMode" class="duration-selector ms-auto">
                     <select v-model="statusDuration" class="form-select">
-                        <option value="60m" selected>60m</option>
-                        <option value="24h">24h</option>
+                        <option value="90m" selected>90 Minutes</option>
+                        <option value="24h">24 Hours</option>
+                        <option value="90d">90 Days</option>
                     </select>
+                </div>
+
+                <!-- External Mode: Clean layout without status badge -->
+                <div v-else class="customer-status ms-auto">
+                    <!-- Simple, clean header for external customers -->
                 </div>
             </h1>
 
@@ -389,6 +397,7 @@ import { getResBaseURL } from "../util-frontend";
 import { STATUS_PAGE_ALL_DOWN, STATUS_PAGE_ALL_UP, STATUS_PAGE_MAINTENANCE, STATUS_PAGE_PARTIAL_DOWN, UP, MAINTENANCE } from "../util.ts";
 import Tag from "../components/Tag.vue";
 import VueMultiselect from "vue-multiselect";
+import deploymentConfig from "../modules/deployment-config.js";
 
 const toast = useToast();
 dayjs.extend(duration);
@@ -444,7 +453,7 @@ export default {
             hasToken: false,
             config: {},
             selectedMonitor: null,
-            statusDuration: "60m",
+            statusDuration: "90m", // Will be overridden for external mode
             incident: null,
             previousIncident: null,
             showImageCropUpload: false,
@@ -461,6 +470,28 @@ export default {
         };
     },
     computed: {
+
+        // Deployment mode detection
+        isInternalMode() {
+            return deploymentConfig.config?.mode === "internal";
+        },
+
+        // Overall system status for external mode
+        overallStatusClass() {
+            // Simple status based on incident state
+            if (this.incident && this.incident.content) {
+                return "badge-danger";
+            }
+            return "badge-success";
+        },
+
+        overallStatusText() {
+            // Customer-friendly status messages
+            if (this.incident && this.incident.content) {
+                return "Service Issues";
+            }
+            return "All Systems Operational";
+        },
 
         logoURL() {
             if (this.imgDataUrl.startsWith("data:")) {
@@ -684,12 +715,24 @@ export default {
 
         statusDuration: {
             handler(newDuration) {
+                // 立即更新全局状态
+                this.$root.statusDuration = newDuration;
+
+                // Save to localStorage for internal mode
+                // Use a more robust check that doesn't depend on timing
+                this.$nextTick(() => {
+                    if (deploymentConfig.config?.mode !== "external") {
+                        localStorage.setItem("statusPageDuration", newDuration);
+                        console.log("StatusPage: Saved duration to localStorage:", newDuration);
+                    }
+                });
+
                 // 如果在编辑模式下,不需要更新数据
                 if (!this.editMode) {
                     this.updateHeartbeatList();
                 }
             },
-            immediate: false  // 不需要在组件创建时立即执行,因为 mounted 中已经调用了 updateHeartbeatList
+            immediate: false  // 不在组件创建时立即执行,避免时序问题
         }
 
     },
@@ -715,6 +758,27 @@ export default {
 
         if (!this.slug) {
             this.slug = "default";
+        }
+
+        // Initialize deployment config for anonymous users
+        if (!deploymentConfig.config) {
+            console.log("StatusPage: Initializing deployment config for anonymous users");
+            await deploymentConfig.initialize();
+        }
+
+        // Set appropriate time range for external mode
+        if (deploymentConfig.config?.mode === "external") {
+            // External mode: 90 days for comprehensive customer view
+            this.statusDuration = "90d";
+            console.log("StatusPage: External mode detected, setting duration to 90d");
+        } else {
+            // Internal mode: restore from localStorage or use default
+            const savedDuration = localStorage.getItem("statusPageDuration");
+            if (savedDuration && [ "90m", "24h", "90d" ].includes(savedDuration)) {
+                this.statusDuration = savedDuration;
+            } else if (!this.statusDuration) {
+                this.statusDuration = "90m";
+            }
         }
 
         this.getData().then((res) => {
@@ -747,6 +811,7 @@ export default {
             console.log(error);
         });
 
+        // Explicitly call updateHeartbeatList to ensure initial data loading
         this.updateHeartbeatList();
 
         // Go to edit page if ?edit present
@@ -788,12 +853,20 @@ export default {
         updateHeartbeatList() {
             // If editMode, it will use the data from websocket.
             if (! this.editMode) {
-                axios.get("/api/status-page/heartbeat/" + this.slug + "/" + this.statusDuration).then((res) => {
+                const cacheBust = Date.now();
+
+                axios.get("/api/status-page/heartbeat/" + this.slug + "/" + this.statusDuration + "?t=" + cacheBust).then((res) => {
                     const { heartbeatList, uptimeList, slaList } = res.data;
 
                     this.$root.heartbeatList = heartbeatList;
+                    this.$root.statusDuration = this.statusDuration;
                     this.$root.uptimeList = uptimeList;
                     this.$root.slaList = slaList || {};
+
+                    // Force update to ensure Vue reactivity
+                    this.$nextTick(() => {
+                        this.$forceUpdate();
+                    });
 
                     const heartbeatIds = Object.keys(heartbeatList);
                     const downMonitors = heartbeatIds.reduce((downMonitorsAmount, currentId) => {
@@ -1297,6 +1370,36 @@ footer {
         width: auto;
         min-width: 80px;
         display: inline-block;
+    }
+}
+
+/* Customer-friendly status badge for external mode */
+.customer-status {
+    display: flex;
+    align-items: center;
+
+    .status-badge {
+        padding: 8px 16px;
+        border-radius: 20px;
+        font-weight: 600;
+        font-size: 0.9rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+
+        &.badge-success {
+            background-color: #10b981;
+            color: white;
+        }
+
+        &.badge-danger {
+            background-color: #ef4444;
+            color: white;
+        }
+
+        &.badge-warning {
+            background-color: #f59e0b;
+            color: white;
+        }
     }
 }
 </style>

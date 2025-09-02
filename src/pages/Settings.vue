@@ -86,6 +86,12 @@ export default {
                 general: {
                     title: this.$t("General"),
                 },
+                reports: {
+                    title: "Reports",
+                },
+                "deployment-config": {
+                    title: this.$t("Deployment Configuration"),
+                },
                 appearance: {
                     title: this.$t("Appearance"),
                 },
