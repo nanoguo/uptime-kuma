@@ -23,7 +23,6 @@ RUN npm ci
 COPY . .
 COPY --chown=node:node --from=build_healthcheck /app/extra/healthcheck /app/extra/healthcheck
 RUN mkdir ./data
-RUN npm run build
 
 ############################################
 # ⭐ Main Image

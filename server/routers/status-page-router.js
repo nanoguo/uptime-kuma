@@ -23,44 +23,66 @@ async function getDailyAggregatedHeartbeats(monitorID, days) {
     const result = [];
 
     try {
-        let dailyStats;
+        // Try to get data from stat_daily table first (preferred for long-term data)
+        let dailyStats = await R.getAll(`
+            SELECT
+                FROM_UNIXTIME(timestamp) as day,
+                up as up_count,
+                down as down_count,
+                0 as pending_count,
+                0 as maintenance_count,
+                (up + down) as total_heartbeats,
+                FROM_UNIXTIME(timestamp) as first_time,
+                FROM_UNIXTIME(timestamp + 86400 - 1) as last_time
+            FROM stat_daily
+            WHERE monitor_id = ? AND timestamp >= UNIX_TIMESTAMP(DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? DAY))
+            ORDER BY timestamp DESC
+            LIMIT ?
+        `, [ monitorID, days, days ]);
 
-        if (Database.dbConfig.type === "sqlite") {
-            // SQLite: Group by date and calculate daily status
-            dailyStats = await R.getAll(`
-                SELECT
-                    DATE(time) as day,
-                    COUNT(*) as total_heartbeats,
-                    SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as up_count,
-                    SUM(CASE WHEN status = 0 THEN 1 ELSE 0 END) as down_count,
-                    SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END) as pending_count,
-                    SUM(CASE WHEN status = 3 THEN 1 ELSE 0 END) as maintenance_count,
-                    MIN(time) as first_time,
-                    MAX(time) as last_time
-                FROM heartbeat
-                WHERE monitor_id = ? AND time >= DATETIME('now', ?)
-                GROUP BY DATE(time)
-                ORDER BY day DESC
-                LIMIT ?
-            `, [ monitorID, `-${days} days`, days ]);
+        // If stat_daily has insufficient data, fallback to heartbeat table aggregation
+        if (dailyStats.length === 0) {
+            console.log(`No stat_daily data found for monitor ${monitorID}, falling back to heartbeat aggregation`);
+
+            if (Database.dbConfig.type === "sqlite") {
+                // SQLite: Group by date and calculate daily status
+                dailyStats = await R.getAll(`
+                    SELECT
+                        DATE(time) as day,
+                        COUNT(*) as total_heartbeats,
+                        SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as up_count,
+                        SUM(CASE WHEN status = 0 THEN 1 ELSE 0 END) as down_count,
+                        SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END) as pending_count,
+                        SUM(CASE WHEN status = 3 THEN 1 ELSE 0 END) as maintenance_count,
+                        MIN(time) as first_time,
+                        MAX(time) as last_time
+                    FROM heartbeat
+                    WHERE monitor_id = ? AND time >= DATETIME('now', ?)
+                    GROUP BY DATE(time)
+                    ORDER BY day DESC
+                    LIMIT ?
+                `, [ monitorID, `-${days} days`, days ]);
+            } else {
+                // MariaDB/MySQL: Group by date and calculate daily status
+                dailyStats = await R.getAll(`
+                    SELECT
+                        DATE(time) as day,
+                        COUNT(*) as total_heartbeats,
+                        SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as up_count,
+                        SUM(CASE WHEN status = 0 THEN 1 ELSE 0 END) as down_count,
+                        SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END) as pending_count,
+                        SUM(CASE WHEN status = 3 THEN 1 ELSE 0 END) as maintenance_count,
+                        MIN(time) as first_time,
+                        MAX(time) as last_time
+                    FROM heartbeat
+                    WHERE monitor_id = ? AND time >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? DAY)
+                    GROUP BY DATE(time)
+                    ORDER BY day DESC
+                    LIMIT ?
+                `, [ monitorID, days, days ]);
+            }
         } else {
-            // MariaDB/MySQL: Group by date and calculate daily status
-            dailyStats = await R.getAll(`
-                SELECT
-                    DATE(time) as day,
-                    COUNT(*) as total_heartbeats,
-                    SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as up_count,
-                    SUM(CASE WHEN status = 0 THEN 1 ELSE 0 END) as down_count,
-                    SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END) as pending_count,
-                    SUM(CASE WHEN status = 3 THEN 1 ELSE 0 END) as maintenance_count,
-                    MIN(time) as first_time,
-                    MAX(time) as last_time
-                FROM heartbeat
-                WHERE monitor_id = ? AND time >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? DAY)
-                GROUP BY DATE(time)
-                ORDER BY day DESC
-                LIMIT ?
-            `, [ monitorID, days, days ]);
+            console.log(`Using stat_daily data for monitor ${monitorID}, found ${dailyStats.length} days of data`);
         }
 
         // Convert daily stats to heartbeat-like format for frontend compatibility
