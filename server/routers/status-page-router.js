@@ -377,25 +377,16 @@ router.get("/api/status-page/heartbeat/:slug/:duration",
                 if (duration === "90d") {
                     console.log(`90d mode detected for monitor ${monitorID}`);
 
-                    // For 90d, calculate uptime from daily uptime percentages
-                    const daysWithData = heartbeats.filter(h => h.daily_stats && h.daily_stats.total > 0);
+                    // For 90d, use UptimeCalculator which loads data from stat_daily table
+                    // This provides more complete historical data than heartbeat aggregation
+                    const breakdown90d = uptimeCalculator.getBreakdown(90, "day");
                     let uptime90d = 0;
 
-                    if (daysWithData.length > 0) {
-                        // Calculate weighted average based on daily uptime percentages
-                        let totalUptime = 0;
-                        let totalWeight = 0;
-
-                        for (const day of daysWithData) {
-                            const dailyUptime = day.daily_stats.up / day.daily_stats.total;
-                            totalUptime += dailyUptime * day.daily_stats.total;
-                            totalWeight += day.daily_stats.total;
-                        }
-
-                        uptime90d = totalWeight > 0 ? totalUptime / totalWeight : 0;
-                        console.log(`90d calculation: ${totalUptime}/${totalWeight} = ${uptime90d} for monitor ${monitorID} (${daysWithData.length} days)`);
+                    if (breakdown90d.up + breakdown90d.down > 0) {
+                        uptime90d = breakdown90d.up / (breakdown90d.up + breakdown90d.down);
+                        console.log(`90d calculation from UptimeCalculator: ${breakdown90d.up}/${breakdown90d.up + breakdown90d.down} = ${uptime90d} for monitor ${monitorID}`);
                     } else {
-                        console.log(`90d calculation: No data available for monitor ${monitorID}`);
+                        console.log(`90d calculation: No data available in UptimeCalculator for monitor ${monitorID}`);
                     }
 
                     uptimeList[`${monitorID}_90d`] = uptime90d;
