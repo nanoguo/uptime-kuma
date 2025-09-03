@@ -384,8 +384,8 @@ router.get("/api/status-page/heartbeat/:slug/:duration",
                         .map(row => row.toPublicJSON());
 
                     if (duration === "24h") {
-                    // 压缩成 24 个小时块
-                        heartbeats = compressHeartbeats(heartbeats, 24, duration);
+                        // 24小时模式：压缩成90个点，每个点代表16分钟（1440/90=16）
+                        heartbeats = compressHeartbeats(heartbeats, 16, duration);
                     }
                     // 90d uses daily aggregation, so no compression needed here
                 }
