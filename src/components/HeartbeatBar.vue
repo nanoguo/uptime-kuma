@@ -32,7 +32,7 @@
 
         <!-- 90d Mode: Beautiful uptime display (both external and internal) -->
         <div
-            v-if="is90d && !$root.isMobile && size !== 'small' && (beatList && beatList.length > 4)"
+            v-if="(is90d || effectiveDuration === '90d') && !$root.isMobile && size !== 'small'"
             class="external-uptime-display" :style="timeStyle"
         >
             <div class="uptime-start">{{ uptimeDisplayStart }}</div>
@@ -41,7 +41,7 @@
                 <span class="uptime-text">{{ uptimeDisplayText }}</span>
                 <div class="divider-line"></div>
             </div>
-            <div class="uptime-end">{{ uptimeDisplayEnd }}</div>
+            <div class="uptime-end">{{ effectiveDuration === '90d' ? 'Today' : uptimeDisplayEnd }}</div>
         </div>
 
         <!-- Internal Mode: Technical time labels (90m/24h only) -->
@@ -54,6 +54,8 @@
             <div v-if="!hasFullWindow" class="spacer"></div>
             <div>{{ timeSinceLastBeat }}</div>
         </div>
+
+
     </div>
 </template>
 
@@ -293,10 +295,9 @@ export default {
             const cell = (this.beatWidth + this.dynamicBeatPadding * 2);
             let baseWidth = this.maxBeat * cell;
 
-            // For 90d mode, no extra width needed as divider lines are now flex elements
+            // For 90d mode, use same width as heartbeat bar, no extra padding
             if (this.is90d) {
-                // Minimal extra space for proper text display and padding
-                baseWidth += 100;
+                return { width: baseWidth + "px" };
             }
 
             return { width: baseWidth + "px" };
@@ -803,12 +804,8 @@ export default {
         color: #9ca3af;
     }
 
-    .spacer {
-        flex: 1; // Takes up remaining space to push the last element to the right
-    }
-
     .uptime-start {
-        flex: 0 0 150px; // Fixed width to prevent overlap with longer lines
+        flex: 0 0 150px; // Fixed width to prevent overlap
         font-weight: 500;
         color: #6b7280;
         text-align: left;
@@ -851,7 +848,7 @@ export default {
     .uptime-end {
         flex: 0 0 100px; // Fixed width to prevent overlap
         color: #374151;
-        font-weight: 600;
+        font-weight: 500; // Match left side font weight  
         text-align: right;
 
         .dark & {

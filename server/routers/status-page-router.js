@@ -24,21 +24,43 @@ async function getDailyAggregatedHeartbeats(monitorID, days) {
 
     try {
         // Try to get data from stat_daily table first (preferred for long-term data)
-        let dailyStats = await R.getAll(`
-            SELECT
-                FROM_UNIXTIME(timestamp) as day,
-                up as up_count,
-                down as down_count,
-                0 as pending_count,
-                0 as maintenance_count,
-                (up + down) as total_heartbeats,
-                FROM_UNIXTIME(timestamp) as first_time,
-                FROM_UNIXTIME(timestamp + 86400 - 1) as last_time
-            FROM stat_daily
-            WHERE monitor_id = ? AND timestamp >= UNIX_TIMESTAMP(DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? DAY))
-            ORDER BY timestamp DESC
-            LIMIT ?
-        `, [ monitorID, days, days ]);
+        let dailyStats;
+
+        if (Database.dbConfig.type === "sqlite") {
+            // SQLite version
+            dailyStats = await R.getAll(`
+                SELECT
+                    datetime(timestamp, 'unixepoch') as day,
+                    up as up_count,
+                    down as down_count,
+                    0 as pending_count,
+                    0 as maintenance_count,
+                    (up + down) as total_heartbeats,
+                    datetime(timestamp, 'unixepoch') as first_time,
+                    datetime(timestamp + 86400 - 1, 'unixepoch') as last_time
+                FROM stat_daily
+                WHERE monitor_id = ? AND timestamp >= strftime('%s', datetime('now', '-' || ? || ' days'))
+                ORDER BY timestamp DESC
+                LIMIT ?
+            `, [ monitorID, days, days ]);
+        } else {
+            // MariaDB/MySQL version
+            dailyStats = await R.getAll(`
+                SELECT
+                    FROM_UNIXTIME(timestamp) as day,
+                    up as up_count,
+                    down as down_count,
+                    0 as pending_count,
+                    0 as maintenance_count,
+                    (up + down) as total_heartbeats,
+                    FROM_UNIXTIME(timestamp) as first_time,
+                    FROM_UNIXTIME(timestamp + 86400 - 1) as last_time
+                FROM stat_daily
+                WHERE monitor_id = ? AND timestamp >= UNIX_TIMESTAMP(DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? DAY))
+                ORDER BY timestamp DESC
+                LIMIT ?
+            `, [ monitorID, days, days ]);
+        }
 
         // If stat_daily has insufficient data, fallback to heartbeat table aggregation
         if (dailyStats.length === 0) {
